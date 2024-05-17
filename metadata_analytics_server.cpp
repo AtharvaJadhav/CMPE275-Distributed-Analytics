@@ -88,7 +88,8 @@ void handleNodeDiscovery(const std::string &message)
             std::string metadataIngestionLeader = discoveryMessage["metadataIngestionLeader"];
             std::string initElectionIngestion = discoveryMessage["initElectionIngestion"];
 
-            // Process the nodes
+            // Collect analytics nodes
+            std::vector<std::string> analyticsNodes;
             for (const auto &node : nodes)
             {
                 if (!node.contains("nodeType") || !node.contains("Ip") || !node.contains("computingCapacity"))
@@ -102,12 +103,17 @@ void handleNodeDiscovery(const std::string &message)
                 double computingCapacity = node["computingCapacity"];
                 std::cout << "Node: " << ip << ", Type: " << nodeType << ", Capacity: " << computingCapacity << std::endl;
 
-                // If it's an analytics node, send Init Analytics message
                 if (nodeType == "analytics")
                 {
-                    std::vector<std::string> replicas = {"192.168.1.4", "192.168.1.5"}; // Example replicas
-                    sendInitAnalytics(ip, replicas);
+                    analyticsNodes.push_back(ip);
                 }
+            }
+
+            // Distribute load among analytics nodes
+            for (const auto &analyticsNode : analyticsNodes)
+            {
+                std::vector<std::string> replicas = analyticsNodes; // Simple example: use all analytics nodes as replicas
+                sendInitAnalytics(analyticsNode, replicas);
             }
 
             std::cout << "Metadata Analytics Leader: " << metadataAnalyticsLeader << std::endl;

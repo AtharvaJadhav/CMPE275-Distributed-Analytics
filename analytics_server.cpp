@@ -74,7 +74,7 @@ void startServer(asio::io_context &io_context, unsigned short port)
     }
 }
 
-void registerWithRegistryServer(const std::string &serverIp, unsigned short port, const std::string &nodeIp)
+void registerWithRegistryServer(const std::string &serverIp, unsigned short port, const std::string &nodeIp, double computingCapacity)
 {
     try
     {
@@ -89,8 +89,7 @@ void registerWithRegistryServer(const std::string &serverIp, unsigned short port
             {"requestType", "registering"},
             {"Ip", nodeIp},
             {"nodeType", "analytics"},
-            {"computingCapacity", 0.7} // Example capacity
-        };
+            {"computingCapacity", computingCapacity}};
 
         std::string message = registrationRequest.dump() + "\n";
         asio::write(socket, asio::buffer(message));
@@ -103,17 +102,27 @@ void registerWithRegistryServer(const std::string &serverIp, unsigned short port
     }
 }
 
-int main()
+int main(int argc, char *argv[])
 {
+    if (argc != 3)
+    {
+        std::cerr << "Usage: " << argv[0] << " <IP_ADDRESS> <PORT>" << std::endl;
+        return 1;
+    }
+
+    std::string nodeIp = argv[1];
+    unsigned short port = static_cast<unsigned short>(std::stoi(argv[2]));
+    double computingCapacity = 0.6; // Example capacity
+
     // Register with registry server
-    registerWithRegistryServer("127.0.0.1", 12345, "192.168.1.3");
+    registerWithRegistryServer("127.0.0.1", 12345, nodeIp, computingCapacity);
 
     // Start server to handle Init Analytics messages
     try
     {
         asio::io_context io_context;
-        std::thread serverThread([&io_context]()
-                                 { startServer(io_context, 12346); });
+        std::thread serverThread([&io_context, port]()
+                                 { startServer(io_context, port); });
 
         serverThread.join();
     }
