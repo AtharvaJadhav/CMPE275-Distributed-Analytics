@@ -1,8 +1,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <asio.hpp>
 #include "json.hpp"
-#include "asio.hpp"
 
 using json = nlohmann::json;
 using asio::ip::tcp;
@@ -32,29 +32,73 @@ std::string nodeTypeToString(NodeType type)
     }
 }
 
-void sendInitAnalytics(const std::string &analyticsIp, const std::vector<std::string> &replicas)
+std::vector<std::string> analyticsNodes;
+int currentNodeIndex = 0;
+
+void sendAnalyticsRequest(int requestId, const std::vector<std::vector<int>> &data)
 {
+    if (analyticsNodes.empty())
+    {
+        std::cerr << "No analytics nodes available." << std::endl;
+        return;
+    }
+
+    // Select the next analytics node in a round-robin fashion
+    std::string analyticsIp = analyticsNodes[currentNodeIndex];
+    currentNodeIndex = (currentNodeIndex + 1) % analyticsNodes.size();
+
     try
     {
         asio::io_context io_context;
         tcp::resolver resolver(io_context);
+        std::cout << "Resolving " << analyticsIp << " on port 12346" << std::endl;
         tcp::resolver::results_type endpoints = resolver.resolve(analyticsIp, "12346");
 
         tcp::socket socket(io_context);
+        std::cout << "Connecting to " << analyticsIp << std::endl;
         asio::connect(socket, endpoints);
 
-        json initAnalyticsMessage = {
-            {"requestType", "Init Analytics"},
-            {"Replicas", replicas}};
+        json analyticsRequest = {
+            {"requestType", "analytics"},
+            {"requestID", requestId},
+            {"Data", data}};
 
-        std::string message = initAnalyticsMessage.dump() + "\n";
+        std::string message = analyticsRequest.dump() + "\n";
         asio::write(socket, asio::buffer(message));
+
+        std::cout << "Sent analytics request to " << analyticsIp << " with request ID: " << requestId << std::endl;
 
         socket.close();
     }
     catch (std::exception &e)
     {
-        std::cerr << "Exception: " << e.what() << std::endl;
+        std::cerr << "Exception while connecting to " << analyticsIp << ": " << e.what() << std::endl;
+    }
+}
+
+void handleAnalyticsAcknowledgment(const std::string &message)
+{
+    try
+    {
+        json acknowledgment = json::parse(message);
+
+        if (acknowledgment["requestType"] == "analytics acknowledgment")
+        {
+            int requestId = acknowledgment["requestID"];
+            std::cout << "Acknowledgment received for request ID: " << requestId << std::endl;
+        }
+        else
+        {
+            std::cerr << "Invalid request type: " << acknowledgment["requestType"] << std::endl;
+        }
+    }
+    catch (json::exception &e)
+    {
+        std::cerr << "JSON Exception: " << e.what() << std::endl;
+    }
+    catch (std::runtime_error &e)
+    {
+        std::cerr << "Runtime Error: " << e.what() << std::endl;
     }
 }
 
@@ -89,7 +133,6 @@ void handleNodeDiscovery(const std::string &message)
             std::string initElectionIngestion = discoveryMessage["initElectionIngestion"];
 
             // Collect analytics nodes
-            std::vector<std::string> analyticsNodes;
             for (const auto &node : nodes)
             {
                 if (!node.contains("nodeType") || !node.contains("Ip") || !node.contains("computingCapacity"))
@@ -109,13 +152,6 @@ void handleNodeDiscovery(const std::string &message)
                 }
             }
 
-            // Distribute load among analytics nodes
-            for (const auto &analyticsNode : analyticsNodes)
-            {
-                std::vector<std::string> replicas = analyticsNodes; // Simple example: use all analytics nodes as replicas
-                sendInitAnalytics(analyticsNode, replicas);
-            }
-
             std::cout << "Metadata Analytics Leader: " << metadataAnalyticsLeader << std::endl;
             std::cout << "Metadata Ingestion Leader: " << metadataIngestionLeader << std::endl;
             std::cout << "Init Election Ingestion: " << initElectionIngestion << std::endl;
@@ -123,6 +159,35 @@ void handleNodeDiscovery(const std::string &message)
         else
         {
             std::cerr << "Invalid request type: " << discoveryMessage["requestType"] << std::endl;
+        }
+    }
+    catch (json::exception &e)
+    {
+        std::cerr << "JSON Exception: " << e.what() << std::endl;
+    }
+    catch (std::runtime_error &e)
+    {
+        std::cerr << "Runtime Error: " << e.what() << std::endl;
+    }
+}
+
+void handleIngestionData(const std::string &message)
+{
+    try
+    {
+        json ingestionMessage = json::parse(message);
+
+        if (ingestionMessage["requestType"] == "ingestion")
+        {
+            std::vector<std::vector<int>> data = ingestionMessage["Data"];
+            static int requestId = 1;
+
+            // Send analytics request
+            sendAnalyticsRequest(requestId++, data);
+        }
+        else
+        {
+            std::cerr << "Invalid request type: " << ingestionMessage["requestType"] << std::endl;
         }
     }
     catch (json::exception &e)
@@ -167,7 +232,7 @@ void sendRegistration(const std::string &serverIp, unsigned short port, const st
     }
     catch (std::exception &e)
     {
-        std::cerr << "Exception: " << e.what() << std::endl;
+        std::cerr << "Exception while registering with registry server: " << e.what() << std::endl;
     }
 }
 
@@ -175,6 +240,55 @@ int main()
 {
     // Example usage of sendRegistration function
     sendRegistration("127.0.0.1", 12345, "192.168.1.2", NodeType::METADATA_ANALYTICS, 0.8);
+
+    // For simplicity, we'll handle acknowledgments and ingestion data in the main thread
+    try
+    {
+        asio::io_context io_context;
+
+        // Thread for acknowledgments
+        std::thread ackThread([&io_context]()
+                              {
+            tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 12348));
+            while (true) {
+                tcp::socket socket(io_context);
+                acceptor.accept(socket);
+
+                asio::streambuf buffer;
+                asio::read_until(socket, buffer, "\n");
+                std::istream is(&buffer);
+                std::string message;
+                std::getline(is, message);
+
+                handleAnalyticsAcknowledgment(message);
+                socket.close();
+            } });
+
+        // Thread for ingestion data
+        std::thread ingestionThread([&io_context]()
+                                    {
+            tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 12349));
+            while (true) {
+                tcp::socket socket(io_context);
+                acceptor.accept(socket);
+
+                asio::streambuf buffer;
+                asio::read_until(socket, buffer, "\n");
+                std::istream is(&buffer);
+                std::string message;
+                std::getline(is, message);
+
+                handleIngestionData(message);
+                socket.close();
+            } });
+
+        ackThread.join();
+        ingestionThread.join();
+    }
+    catch (std::exception &e)
+    {
+        std::cerr << "Exception in main thread: " << e.what() << std::endl;
+    }
 
     return 0;
 }

@@ -28,6 +28,40 @@ void handleInitAnalytics(const std::string &message)
             }
             std::cout << std::endl;
         }
+        else if (initAnalyticsMessage["requestType"] == "analytics")
+        {
+            int requestId = initAnalyticsMessage["requestID"];
+            std::cout << "Analytics request received with ID: " << requestId << std::endl;
+
+            // Process the data (placeholder)
+            std::vector<std::vector<int>> data = initAnalyticsMessage["Data"];
+            for (const auto &item : data)
+            {
+                std::cout << "Data: ";
+                for (const auto &value : item)
+                {
+                    std::cout << value << " ";
+                }
+                std::cout << std::endl;
+            }
+
+            // Send acknowledgment
+            asio::io_context io_context;
+            tcp::resolver resolver(io_context);
+            tcp::resolver::results_type endpoints = resolver.resolve("127.0.0.1", "12348");
+
+            tcp::socket socket(io_context);
+            asio::connect(socket, endpoints);
+
+            json acknowledgment = {
+                {"requestType", "analytics acknowledgment"},
+                {"requestID", requestId}};
+
+            std::string ackMessage = acknowledgment.dump() + "\n";
+            asio::write(socket, asio::buffer(ackMessage));
+
+            socket.close();
+        }
         else
         {
             std::cerr << "Invalid request type: " << initAnalyticsMessage["requestType"] << std::endl;
@@ -117,7 +151,7 @@ int main(int argc, char *argv[])
     // Register with registry server
     registerWithRegistryServer("127.0.0.1", 12345, nodeIp, computingCapacity);
 
-    // Start server to handle Init Analytics messages
+    // Start server to handle Init Analytics messages and analytics requests
     try
     {
         asio::io_context io_context;
