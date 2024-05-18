@@ -24,9 +24,19 @@ void sendIngestionData(const std::string &serverIp, unsigned short port, const s
         std::string message = ingestionRequest.dump() + "\n";
         asio::write(socket, asio::buffer(message));
 
+        std::cout << "Sent ingestion data to " << serverIp << " on port " << port << std::endl;
+        for (const auto &row : data)
+        {
+            for (const auto &item : row)
+            {
+                std::cout << item << " ";
+            }
+            std::cout << std::endl;
+        }
+
         socket.close();
     }
-    catch (std::exception &e)
+    catch (const std::exception &e)
     {
         std::cerr << "Exception: " << e.what() << std::endl;
     }
@@ -38,7 +48,7 @@ int main()
     std::vector<std::vector<int>> data = {{1}, {2}, {3}};
 
     // Send data to metadata analytics server
-    sendIngestionData("127.0.0.1", 12349, data); // Ensure this port matches the metadata analytics server ingestion port
+    sendIngestionData("10.0.0.65", 12459, data); // Ensure this port matches the metadata analytics server ingestion port
 
     return 0;
 }

@@ -51,8 +51,8 @@ void sendAnalyticsRequest(int requestId, const std::vector<std::vector<int>> &da
     {
         asio::io_context io_context;
         tcp::resolver resolver(io_context);
-        std::cout << "Resolving " << analyticsIp << " on port 12346" << std::endl;
-        tcp::resolver::results_type endpoints = resolver.resolve(analyticsIp, "12346");
+        std::cout << "Resolving " << analyticsIp << " on port 12456" << std::endl;
+        tcp::resolver::results_type endpoints = resolver.resolve(analyticsIp, "12456");
 
         tcp::socket socket(io_context);
         std::cout << "Connecting to " << analyticsIp << std::endl;
@@ -70,7 +70,7 @@ void sendAnalyticsRequest(int requestId, const std::vector<std::vector<int>> &da
 
         socket.close();
     }
-    catch (std::exception &e)
+    catch (const std::exception &e)
     {
         std::cerr << "Exception while connecting to " << analyticsIp << ": " << e.what() << std::endl;
     }
@@ -92,11 +92,11 @@ void handleAnalyticsAcknowledgment(const std::string &message)
             std::cerr << "Invalid request type: " << acknowledgment["requestType"] << std::endl;
         }
     }
-    catch (json::exception &e)
+    catch (const json::exception &e)
     {
         std::cerr << "JSON Exception: " << e.what() << std::endl;
     }
-    catch (std::runtime_error &e)
+    catch (const std::runtime_error &e)
     {
         std::cerr << "Runtime Error: " << e.what() << std::endl;
     }
@@ -161,11 +161,11 @@ void handleNodeDiscovery(const std::string &message)
             std::cerr << "Invalid request type: " << discoveryMessage["requestType"] << std::endl;
         }
     }
-    catch (json::exception &e)
+    catch (const json::exception &e)
     {
         std::cerr << "JSON Exception: " << e.what() << std::endl;
     }
-    catch (std::runtime_error &e)
+    catch (const std::runtime_error &e)
     {
         std::cerr << "Runtime Error: " << e.what() << std::endl;
     }
@@ -190,11 +190,11 @@ void handleIngestionData(const std::string &message)
             std::cerr << "Invalid request type: " << ingestionMessage["requestType"] << std::endl;
         }
     }
-    catch (json::exception &e)
+    catch (const json::exception &e)
     {
         std::cerr << "JSON Exception: " << e.what() << std::endl;
     }
-    catch (std::runtime_error &e)
+    catch (const std::runtime_error &e)
     {
         std::cerr << "Runtime Error: " << e.what() << std::endl;
     }
@@ -230,7 +230,7 @@ void sendRegistration(const std::string &serverIp, unsigned short port, const st
 
         socket.close();
     }
-    catch (std::exception &e)
+    catch (const std::exception &e)
     {
         std::cerr << "Exception while registering with registry server: " << e.what() << std::endl;
     }
@@ -239,7 +239,7 @@ void sendRegistration(const std::string &serverIp, unsigned short port, const st
 int main()
 {
     // Example usage of sendRegistration function
-    sendRegistration("127.0.0.1", 12345, "192.168.1.2", NodeType::METADATA_ANALYTICS, 0.8);
+    sendRegistration("10.0.0.65", 12345, "10.0.0.65", NodeType::METADATA_ANALYTICS, 0.8);
 
     // For simplicity, we'll handle acknowledgments and ingestion data in the main thread
     try
@@ -249,7 +249,7 @@ int main()
         // Thread for acknowledgments
         std::thread ackThread([&io_context]()
                               {
-            tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 12348));
+            tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 12458));
             while (true) {
                 tcp::socket socket(io_context);
                 acceptor.accept(socket);
@@ -267,7 +267,7 @@ int main()
         // Thread for ingestion data
         std::thread ingestionThread([&io_context]()
                                     {
-            tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 12349));
+            tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 12459));
             while (true) {
                 tcp::socket socket(io_context);
                 acceptor.accept(socket);
@@ -285,7 +285,7 @@ int main()
         ackThread.join();
         ingestionThread.join();
     }
-    catch (std::exception &e)
+    catch (const std::exception &e)
     {
         std::cerr << "Exception in main thread: " << e.what() << std::endl;
     }

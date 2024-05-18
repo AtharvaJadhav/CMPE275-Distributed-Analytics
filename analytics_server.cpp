@@ -48,7 +48,7 @@ void handleInitAnalytics(const std::string &message)
             // Send acknowledgment
             asio::io_context io_context;
             tcp::resolver resolver(io_context);
-            tcp::resolver::results_type endpoints = resolver.resolve("127.0.0.1", "12348");
+            tcp::resolver::results_type endpoints = resolver.resolve("10.0.0.65", "12458");
 
             tcp::socket socket(io_context);
             asio::connect(socket, endpoints);
@@ -67,11 +67,11 @@ void handleInitAnalytics(const std::string &message)
             std::cerr << "Invalid request type: " << initAnalyticsMessage["requestType"] << std::endl;
         }
     }
-    catch (json::exception &e)
+    catch (const json::exception &e)
     {
         std::cerr << "JSON Exception: " << e.what() << std::endl;
     }
-    catch (std::runtime_error &e)
+    catch (const std::runtime_error &e)
     {
         std::cerr << "Runtime Error: " << e.what() << std::endl;
     }
@@ -91,7 +91,7 @@ void handleClient(tcp::socket socket)
 
         socket.close();
     }
-    catch (std::exception &e)
+    catch (const std::exception &e)
     {
         std::cerr << "Exception in client handling: " << e.what() << std::endl;
     }
@@ -130,7 +130,7 @@ void registerWithRegistryServer(const std::string &serverIp, unsigned short port
 
         socket.close();
     }
-    catch (std::exception &e)
+    catch (const std::exception &e)
     {
         std::cerr << "Exception: " << e.what() << std::endl;
     }
@@ -149,7 +149,7 @@ int main(int argc, char *argv[])
     double computingCapacity = 0.6; // Example capacity
 
     // Register with registry server
-    registerWithRegistryServer("127.0.0.1", 12345, nodeIp, computingCapacity);
+    registerWithRegistryServer("10.0.0.65", 12345, nodeIp, computingCapacity);
 
     // Start server to handle Init Analytics messages and analytics requests
     try
@@ -160,7 +160,7 @@ int main(int argc, char *argv[])
 
         serverThread.join();
     }
-    catch (std::exception &e)
+    catch (const std::exception &e)
     {
         std::cerr << "Exception in server: " << e.what() << std::endl;
     }
