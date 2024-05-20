@@ -35,7 +35,7 @@ std::string nodeTypeToString(NodeType type)
 std::vector<std::string> analyticsNodes;
 int currentNodeIndex = 0;
 
-void sendAnalyticsRequest(int requestId, const std::vector<std::vector<int>> &data)
+void sendAnalyticsRequest(int requestId, const std::vector<std::vector<std::string>> &data)
 {
     if (analyticsNodes.empty())
     {
@@ -73,6 +73,75 @@ void sendAnalyticsRequest(int requestId, const std::vector<std::vector<int>> &da
     catch (const std::exception &e)
     {
         std::cerr << "Exception while connecting to " << analyticsIp << ": " << e.what() << std::endl;
+    }
+}
+
+void sendQueryRequest(int requestId, int queryType)
+{
+    if (analyticsNodes.empty())
+    {
+        std::cerr << "No analytics nodes available." << std::endl;
+        return;
+    }
+
+    // Select the next analytics node in a round-robin fashion
+    std::string analyticsIp = analyticsNodes[currentNodeIndex];
+    currentNodeIndex = (currentNodeIndex + 1) % analyticsNodes.size();
+
+    try
+    {
+        asio::io_context io_context;
+        tcp::resolver resolver(io_context);
+        tcp::resolver::results_type endpoints = resolver.resolve(analyticsIp, "12456");
+
+        tcp::socket socket(io_context);
+        asio::connect(socket, endpoints);
+
+        json queryRequest = {
+            {"requestType", "query"},
+            {"requestID", requestId},
+            {"query", queryType}};
+
+        std::string message = queryRequest.dump() + "\n";
+        asio::write(socket, asio::buffer(message));
+
+        std::cout << "Sent query request to " << analyticsIp << " with request ID: " << requestId << " and query type: " << queryType << std::endl;
+
+        socket.close();
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Exception while connecting to " << analyticsIp << ": " << e.what() << std::endl;
+    }
+}
+
+void handleQueryResponse(const std::string &message)
+{
+    try
+    {
+        json response = json::parse(message);
+
+        if (response["requestType"] == "query response")
+        {
+            int requestId = response["requestID"];
+            std::string maxArea = response["maxArea"];
+            double maxValue = response.contains("maxAverage") ? response["maxAverage"] : response["maxAqi"];
+
+            std::cout << "Query response received for request ID: " << requestId << std::endl;
+            std::cout << "Max Area: " << maxArea << ", Max Value: " << maxValue << std::endl;
+        }
+        else
+        {
+            std::cerr << "Invalid request type: " << response["requestType"] << std::endl;
+        }
+    }
+    catch (const json::exception &e)
+    {
+        std::cerr << "JSON Exception: " << e.what() << std::endl;
+    }
+    catch (const std::runtime_error &e)
+    {
+        std::cerr << "Runtime Error: " << e.what() << std::endl;
     }
 }
 
@@ -179,11 +248,19 @@ void handleIngestionData(const std::string &message)
 
         if (ingestionMessage["requestType"] == "ingestion")
         {
-            std::vector<std::vector<int>> data = ingestionMessage["Data"];
+            std::vector<std::vector<std::string>> data = ingestionMessage["Data"];
             static int requestId = 1;
 
             // Send analytics request
             sendAnalyticsRequest(requestId++, data);
+        }
+        else if (ingestionMessage["requestType"] == "query")
+        {
+            int requestId = ingestionMessage["requestID"];
+            int queryType = ingestionMessage["query"];
+
+            // Send query request
+            sendQueryRequest(requestId, queryType);
         }
         else
         {
@@ -236,6 +313,25 @@ void sendRegistration(const std::string &serverIp, unsigned short port, const st
     }
 }
 
+void startServer(asio::io_context &io_context, unsigned short port)
+{
+    tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
+    while (true)
+    {
+        tcp::socket socket(io_context);
+        acceptor.accept(socket);
+
+        asio::streambuf buffer;
+        asio::read_until(socket, buffer, "\n");
+        std::istream is(&buffer);
+        std::string message;
+        std::getline(is, message);
+
+        handleQueryResponse(message);
+        socket.close();
+    }
+}
+
 int main()
 {
     // Example usage of sendRegistration function
@@ -282,8 +378,13 @@ int main()
                 socket.close();
             } });
 
+        // Thread for query responses
+        std::thread queryThread([&io_context]()
+                                { startServer(io_context, 12460); });
+
         ackThread.join();
         ingestionThread.join();
+        queryThread.join();
     }
     catch (const std::exception &e)
     {
