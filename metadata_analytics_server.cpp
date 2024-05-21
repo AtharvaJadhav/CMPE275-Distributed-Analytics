@@ -22,6 +22,8 @@ void handleNodeDiscovery(const std::string &message)
 {
     try
     {
+        std::cout << "Received node discovery message: " << message << std::endl; // Log the received message
+
         json discoveryMessage = json::parse(message);
 
         if (discoveryMessage["requestType"] == "Node Discovery")
@@ -224,6 +226,8 @@ void handleClient(tcp::socket socket)
         std::string message;
         std::getline(is, message);
 
+        std::cout << "Received message: " << message << std::endl; // Log received message
+
         handleInitAnalytics(message);
 
         socket.close();
@@ -241,11 +245,12 @@ void startServer(asio::io_context &io_context, unsigned short port)
     {
         tcp::socket socket(io_context);
         acceptor.accept(socket);
+        std::cout << "Accepted connection from: " << socket.remote_endpoint() << std::endl; // Log connection acceptance
         std::thread(handleClient, std::move(socket)).detach();
     }
 }
 
-void registerWithRegistryServer(const std::string &nodeIp, double computingCapacity)
+void registerWithRegistryServer(double computingCapacity)
 {
     try
     {
@@ -258,12 +263,14 @@ void registerWithRegistryServer(const std::string &nodeIp, double computingCapac
 
         json registrationRequest = {
             {"requestType", "registering"},
-            {"Ip", nodeIp},
+            {"Ip", "192.168.1.2"}, // Update this IP address as needed
             {"nodeType", "metadata Analytics"},
             {"computingCapacity", computingCapacity}};
 
         std::string message = registrationRequest.dump() + "\n";
         asio::write(socket, asio::buffer(message));
+
+        std::cout << "Sent registration request to registry server" << std::endl; // Log registration request
 
         asio::streambuf response;
         asio::read_until(socket, response, "\n");
@@ -283,14 +290,10 @@ void registerWithRegistryServer(const std::string &nodeIp, double computingCapac
 
 int main()
 {
-    // Use local IP for the node, e.g., "192.168.1.2", and port 12457 for this example
-    std::string nodeIp = "192.168.1.2";
     double computingCapacity = 0.8;
 
-    // Register with registry server
-    registerWithRegistryServer(nodeIp, computingCapacity);
+    registerWithRegistryServer(computingCapacity);
 
-    // Start the server to handle Init Analytics messages and analytics requests
     try
     {
         asio::io_context io_context;
