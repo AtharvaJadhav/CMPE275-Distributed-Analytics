@@ -10,7 +10,7 @@
 using json = nlohmann::json;
 using asio::ip::tcp;
 
-std::vector<std::vector<std::string>> storedData; // To store ingested data
+std::vector<std::vector<std::string>> storedData;
 
 void handleInitAnalytics(const std::string &message)
 {
@@ -38,7 +38,6 @@ void handleInitAnalytics(const std::string &message)
             int requestId = initAnalyticsMessage["requestID"];
             std::cout << "Analytics request received with ID: " << requestId << std::endl;
 
-            // Process the data
             std::vector<std::vector<std::string>> data = initAnalyticsMessage["Data"];
             storedData.insert(storedData.end(), data.begin(), data.end());
 
@@ -52,10 +51,9 @@ void handleInitAnalytics(const std::string &message)
                 std::cout << std::endl;
             }
 
-            // Send acknowledgment
             asio::io_context io_context;
             tcp::resolver resolver(io_context);
-            tcp::resolver::results_type endpoints = resolver.resolve("10.0.0.65", "12458");
+            tcp::resolver::results_type endpoints = resolver.resolve("127.0.0.1", "12458");
 
             tcp::socket socket(io_context);
             asio::connect(socket, endpoints);
@@ -80,7 +78,6 @@ void handleInitAnalytics(const std::string &message)
 
             if (queryType == 0)
             {
-                // QUERY 0: Maximum of the averages AQI over all areas and all timelines
                 std::unordered_map<std::string, std::vector<double>> areaData;
                 for (const auto &item : storedData)
                 {
@@ -104,7 +101,6 @@ void handleInitAnalytics(const std::string &message)
             }
             else if (queryType == 1)
             {
-                // QUERY 1: Maximum of the maximum AQIs over all time over all the areas
                 std::unordered_map<std::string, double> areaMaxData;
                 for (const auto &item : storedData)
                 {
@@ -128,10 +124,9 @@ void handleInitAnalytics(const std::string &message)
                 maxValue = maxAqi;
             }
 
-            // Send query response
             asio::io_context io_context;
             tcp::resolver resolver(io_context);
-            tcp::resolver::results_type endpoints = resolver.resolve("10.0.0.65", "12460");
+            tcp::resolver::results_type endpoints = resolver.resolve("127.0.0.1", "12460");
 
             tcp::socket socket(io_context);
             asio::connect(socket, endpoints);
@@ -240,12 +235,10 @@ int main(int argc, char *argv[])
 
     std::string nodeIp = argv[1];
     unsigned short port = static_cast<unsigned short>(std::stoi(argv[2]));
-    double computingCapacity = 0.6; // Example capacity
+    double computingCapacity = 0.6;
 
-    // Register with registry server
-    registerWithRegistryServer("10.0.0.65", 12345, nodeIp, computingCapacity);
+    registerWithRegistryServer("192.168.1.102", 12351, nodeIp, computingCapacity);
 
-    // Start server to handle Init Analytics messages and analytics requests
     try
     {
         asio::io_context io_context;

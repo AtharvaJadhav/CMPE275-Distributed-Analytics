@@ -14,6 +14,55 @@ std::vector<std::vector<std::string>> storedData;
 std::vector<std::string> analyticsNodes;
 int currentNodeIndex = 0;
 
+void handleInitAnalytics(const std::string &message);
+void handleClient(tcp::socket socket);
+void startServer(asio::io_context &io_context, unsigned short port);
+
+void handleNodeDiscovery(const std::string &message)
+{
+    try
+    {
+        json discoveryMessage = json::parse(message);
+
+        if (discoveryMessage["requestType"] == "Node Discovery")
+        {
+            std::vector<json> nodes = discoveryMessage["nodes"];
+            std::string metadataAnalyticsLeader = discoveryMessage["metadataAnalyticsLeader"];
+            std::string metadataIngestionLeader = discoveryMessage["metadataIngestionLeader"];
+            std::string initElectionIngestion = discoveryMessage["initElectionIngestion"];
+
+            for (const auto &node : nodes)
+            {
+                std::string nodeType = node["nodeType"];
+                std::string ip = node["Ip"];
+                double computingCapacity = node["computingCapacity"];
+                std::cout << "Node: " << ip << ", Type: " << nodeType << ", Capacity: " << computingCapacity << std::endl;
+
+                if (nodeType == "analytics")
+                {
+                    analyticsNodes.push_back(ip);
+                }
+            }
+
+            std::cout << "Metadata Analytics Leader: " << metadataAnalyticsLeader << std::endl;
+            std::cout << "Metadata Ingestion Leader: " << metadataIngestionLeader << std::endl;
+            std::cout << "Init Election Ingestion: " << initElectionIngestion << std::endl;
+        }
+        else
+        {
+            std::cerr << "Invalid request type: " << discoveryMessage["requestType"] << std::endl;
+        }
+    }
+    catch (const json::exception &e)
+    {
+        std::cerr << "JSON Exception: " << e.what() << std::endl;
+    }
+    catch (const std::runtime_error &e)
+    {
+        std::cerr << "Runtime Error: " << e.what() << std::endl;
+    }
+}
+
 void handleInitAnalytics(const std::string &message)
 {
     try
@@ -175,8 +224,6 @@ void handleClient(tcp::socket socket)
         std::string message;
         std::getline(is, message);
 
-        std::cout << "Received message: " << message << std::endl; // Log received message
-
         handleInitAnalytics(message);
 
         socket.close();
@@ -194,18 +241,17 @@ void startServer(asio::io_context &io_context, unsigned short port)
     {
         tcp::socket socket(io_context);
         acceptor.accept(socket);
-        std::cout << "Accepted connection from: " << socket.remote_endpoint() << std::endl; // Log connection acceptance
         std::thread(handleClient, std::move(socket)).detach();
     }
 }
 
-void registerWithRegistryServer(const std::string &serverIp, unsigned short port, const std::string &nodeIp, double computingCapacity)
+void registerWithRegistryServer(const std::string &nodeIp, double computingCapacity)
 {
     try
     {
         asio::io_context io_context;
         tcp::resolver resolver(io_context);
-        tcp::resolver::results_type endpoints = resolver.resolve(serverIp, std::to_string(port));
+        tcp::resolver::results_type endpoints = resolver.resolve("192.168.1.102", "12351");
 
         tcp::socket socket(io_context);
         asio::connect(socket, endpoints);
@@ -213,41 +259,43 @@ void registerWithRegistryServer(const std::string &serverIp, unsigned short port
         json registrationRequest = {
             {"requestType", "registering"},
             {"Ip", nodeIp},
-            {"nodeType", "analytics"},
+            {"nodeType", "metadata Analytics"},
             {"computingCapacity", computingCapacity}};
 
         std::string message = registrationRequest.dump() + "\n";
         asio::write(socket, asio::buffer(message));
 
-        std::cout << "Sent registration request to registry server" << std::endl; // Log registration request
+        asio::streambuf response;
+        asio::read_until(socket, response, "\n");
+        std::istream is(&response);
+        std::string responseMessage;
+        std::getline(is, responseMessage);
+
+        handleNodeDiscovery(responseMessage);
 
         socket.close();
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Exception: " << e.what() << std::endl;
+        std::cerr << "Exception while registering with registry server: " << e.what() << std::endl;
     }
 }
 
-int main(int argc, char *argv[])
+int main()
 {
-    if (argc != 3)
-    {
-        std::cerr << "Usage: " << argv[0] << " <IP_ADDRESS> <PORT>" << std::endl;
-        return 1;
-    }
+    // Use local IP for the node, e.g., "192.168.1.2", and port 12457 for this example
+    std::string nodeIp = "192.168.1.2";
+    double computingCapacity = 0.8;
 
-    std::string nodeIp = argv[1];
-    unsigned short port = static_cast<unsigned short>(std::stoi(argv[2]));
-    double computingCapacity = 0.6;
+    // Register with registry server
+    registerWithRegistryServer(nodeIp, computingCapacity);
 
-    registerWithRegistryServer("127.0.0.1", 12345, nodeIp, computingCapacity);
-
+    // Start the server to handle Init Analytics messages and analytics requests
     try
     {
         asio::io_context io_context;
-        std::thread serverThread([&io_context, port]()
-                                 { startServer(io_context, port); });
+        std::thread serverThread([&io_context]()
+                                 { startServer(io_context, 12457); });
 
         serverThread.join();
     }
