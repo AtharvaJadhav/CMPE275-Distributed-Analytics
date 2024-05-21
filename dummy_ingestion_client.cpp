@@ -73,17 +73,14 @@ void sendQueryRequest(const std::string &serverIp, unsigned short port, int requ
 
 int main()
 {
-    // Example data to be ingested
     std::vector<std::vector<std::string>> data = {
         {"2020-08-10T01:00@0", "41.75613", "-124.20347", "PM2.5", "17.3", "UG/M3", "18.0", "62", "2", "Crescent City", "North Coast Unified Air Quality Management District", "840060150007", "840060150007"},
         {"2020-08-10T02:00@1", "41.75613", "-124.20347", "PM2.5", "20.1", "UG/M3", "20.0", "60", "3", "Crescent City", "North Coast Unified Air Quality Management District", "840060150007", "840060150007"}};
 
-    // Send data to metadata analytics server
-    sendIngestionData("10.0.0.65", 12459, data); // Ensure this port matches the metadata analytics server ingestion port
+    sendIngestionData("127.0.0.1", 12459, data);
 
-    // Send query requests
-    sendQueryRequest("10.0.0.65", 12459, 1, 0); // Query 0: Maximum of the averages AQI over all areas and all timelines
-    sendQueryRequest("10.0.0.65", 12459, 2, 1); // Query 1: Maximum of the maximum AQIs over all time over all the areas
+    sendQueryRequest("127.0.0.1", 12459, 1, 0);
+    sendQueryRequest("127.0.0.1", 12459, 2, 1);
 
     return 0;
 }
