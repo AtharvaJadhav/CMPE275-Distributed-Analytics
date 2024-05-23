@@ -1,40 +1,50 @@
 #include <iostream>
 #include <string>
-#include <asio.hpp>
-#include "json.hpp"
-
-using json = nlohmann::json;
-using asio::ip::tcp;
+#include <QTcpSocket>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 void sendIngestionData(const std::string &serverIp, unsigned short port, const std::vector<std::vector<std::string>> &data)
 {
     try
     {
-        asio::io_context io_context;
-        tcp::resolver resolver(io_context);
-        tcp::resolver::results_type endpoints = resolver.resolve(serverIp, std::to_string(port));
-
-        tcp::socket socket(io_context);
-        asio::connect(socket, endpoints);
-
-        json ingestionRequest = {
-            {"requestType", "ingestion"},
-            {"Data", data}};
-
-        std::string message = ingestionRequest.dump() + "\n";
-        asio::write(socket, asio::buffer(message));
-
-        std::cout << "Sent ingestion data to " << serverIp << " on port " << port << std::endl;
-        for (const auto &row : data)
+        QTcpSocket socket;
+        socket.connectToHost(QString::fromStdString(serverIp), port);
+        if (socket.waitForConnected())
         {
-            for (const auto &item : row)
+            QJsonArray dataArray;
+            for (const auto &row : data)
             {
-                std::cout << item << " ";
+                QJsonArray jsonRow;
+                for (const auto &item : row)
+                {
+                    jsonRow.append(QString::fromStdString(item));
+                }
+                dataArray.append(jsonRow);
             }
-            std::cout << std::endl;
-        }
 
-        socket.close();
+            QJsonObject ingestionRequest;
+            ingestionRequest["requestType"] = "ingestion";
+            ingestionRequest["Data"] = dataArray;
+
+            QJsonDocument doc(ingestionRequest);
+            std::string message = doc.toJson(QJsonDocument::Compact).toStdString() + "\n";
+            socket.write(message.c_str());
+            socket.waitForBytesWritten();
+
+            std::cout << "Sent ingestion data to " << serverIp << " on port " << port << std::endl;
+            for (const auto &row : data)
+            {
+                for (const auto &item : row)
+                {
+                    std::cout << item << " ";
+                }
+                std::cout << std::endl;
+            }
+
+            socket.close();
+        }
     }
     catch (const std::exception &e)
     {
@@ -46,24 +56,24 @@ void sendQueryRequest(const std::string &serverIp, unsigned short port, int requ
 {
     try
     {
-        asio::io_context io_context;
-        tcp::resolver resolver(io_context);
-        tcp::resolver::results_type endpoints = resolver.resolve(serverIp, std::to_string(port));
+        QTcpSocket socket;
+        socket.connectToHost(QString::fromStdString(serverIp), port);
+        if (socket.waitForConnected())
+        {
+            QJsonObject queryRequest;
+            queryRequest["requestType"] = "query";
+            queryRequest["requestID"] = requestId;
+            queryRequest["query"] = queryType;
 
-        tcp::socket socket(io_context);
-        asio::connect(socket, endpoints);
+            QJsonDocument doc(queryRequest);
+            std::string message = doc.toJson(QJsonDocument::Compact).toStdString() + "\n";
+            socket.write(message.c_str());
+            socket.waitForBytesWritten();
 
-        json queryRequest = {
-            {"requestType", "query"},
-            {"requestID", requestId},
-            {"query", queryType}};
+            std::cout << "Sent query request to " << serverIp << " on port " << port << " with request ID: " << requestId << " and query type: " << queryType << std::endl;
 
-        std::string message = queryRequest.dump() + "\n";
-        asio::write(socket, asio::buffer(message));
-
-        std::cout << "Sent query request to " << serverIp << " on port " << port << " with request ID: " << requestId << " and query type: " << queryType << std::endl;
-
-        socket.close();
+            socket.close();
+        }
     }
     catch (const std::exception &e)
     {

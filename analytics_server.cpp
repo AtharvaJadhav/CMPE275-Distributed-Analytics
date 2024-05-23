@@ -4,11 +4,11 @@
 #include <thread>
 #include <unordered_map>
 #include <numeric>
-#include <asio.hpp>
-#include "json.hpp"
-
-using json = nlohmann::json;
-using asio::ip::tcp;
+#include <QTcpSocket>
+#include <QTcpServer>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 std::vector<std::vector<std::string>> storedData; // To store ingested data
 
@@ -16,33 +16,43 @@ void handleInitAnalytics(const std::string &message)
 {
     try
     {
-        json initAnalyticsMessage = json::parse(message);
+        QJsonDocument doc = QJsonDocument::fromJson(QString::fromStdString(message).toUtf8());
+        QJsonObject initAnalyticsMessage = doc.object();
 
-        if (initAnalyticsMessage["requestType"] == "Init Analytics")
+        if (initAnalyticsMessage["requestType"].toString() == "Init Analytics")
         {
-            if (!initAnalyticsMessage.contains("Replicas") || !initAnalyticsMessage["Replicas"].is_array())
+            if (!initAnalyticsMessage.contains("Replicas") || !initAnalyticsMessage["Replicas"].isArray())
             {
                 throw std::runtime_error("Invalid or missing 'Replicas' key in Init Analytics message");
             }
 
-            std::vector<std::string> replicas = initAnalyticsMessage["Replicas"];
+            QJsonArray replicas = initAnalyticsMessage["Replicas"].toArray();
             std::cout << "Init Analytics received. Replicas: ";
             for (const auto &replica : replicas)
             {
-                std::cout << replica << " ";
+                std::cout << replica.toString().toStdString() << " ";
             }
             std::cout << std::endl;
         }
-        else if (initAnalyticsMessage["requestType"] == "analytics")
+        else if (initAnalyticsMessage["requestType"].toString() == "analytics")
         {
-            int requestId = initAnalyticsMessage["requestID"];
+            int requestId = initAnalyticsMessage["requestID"].toInt();
             std::cout << "Analytics request received with ID: " << requestId << std::endl;
 
             // Process the data
-            std::vector<std::vector<std::string>> data = initAnalyticsMessage["Data"];
-            storedData.insert(storedData.end(), data.begin(), data.end());
+            QJsonArray dataArray = initAnalyticsMessage["Data"].toArray();
+            for (const auto &dataValue : dataArray)
+            {
+                std::vector<std::string> dataRow;
+                QJsonArray dataItem = dataValue.toArray();
+                for (const auto &item : dataItem)
+                {
+                    dataRow.push_back(item.toString().toStdString());
+                }
+                storedData.push_back(dataRow);
+            }
 
-            for (const auto &item : data)
+            for (const auto &item : storedData)
             {
                 std::cout << "Data: ";
                 for (const auto &value : item)
@@ -53,26 +63,25 @@ void handleInitAnalytics(const std::string &message)
             }
 
             // Send acknowledgment
-            asio::io_context io_context;
-            tcp::resolver resolver(io_context);
-            tcp::resolver::results_type endpoints = resolver.resolve("10.0.0.65", "12458");
+            QTcpSocket socket;
+            socket.connectToHost("10.0.0.65", 12458);
+            if (socket.waitForConnected())
+            {
+                QJsonObject acknowledgment;
+                acknowledgment["requestType"] = "analytics acknowledgment";
+                acknowledgment["requestID"] = requestId;
 
-            tcp::socket socket(io_context);
-            asio::connect(socket, endpoints);
-
-            json acknowledgment = {
-                {"requestType", "analytics acknowledgment"},
-                {"requestID", requestId}};
-
-            std::string ackMessage = acknowledgment.dump() + "\n";
-            asio::write(socket, asio::buffer(ackMessage));
-
-            socket.close();
+                QJsonDocument ackDoc(acknowledgment);
+                std::string ackMessage = ackDoc.toJson(QJsonDocument::Compact).toStdString() + "\n";
+                socket.write(ackMessage.c_str());
+                socket.waitForBytesWritten();
+                socket.close();
+            }
         }
-        else if (initAnalyticsMessage["requestType"] == "query")
+        else if (initAnalyticsMessage["requestType"].toString() == "query")
         {
-            int requestId = initAnalyticsMessage["requestID"];
-            int queryType = initAnalyticsMessage["query"];
+            int requestId = initAnalyticsMessage["requestID"].toInt();
+            int queryType = initAnalyticsMessage["query"].toInt();
             std::cout << "Query request received with ID: " << requestId << " and query type: " << queryType << std::endl;
 
             std::string maxArea;
@@ -129,41 +138,37 @@ void handleInitAnalytics(const std::string &message)
             }
 
             // Send query response
-            asio::io_context io_context;
-            tcp::resolver resolver(io_context);
-            tcp::resolver::results_type endpoints = resolver.resolve("10.0.0.65", "12460");
-
-            tcp::socket socket(io_context);
-            asio::connect(socket, endpoints);
-
-            json queryResponse = {
-                {"requestType", "query response"},
-                {"requestID", requestId},
-                {"maxArea", maxArea}};
-            if (queryType == 0)
+            QTcpSocket socket;
+            socket.connectToHost("10.0.0.65", 12460);
+            if (socket.waitForConnected())
             {
-                queryResponse["maxAverage"] = maxValue;
+                QJsonObject queryResponse;
+                queryResponse["requestType"] = "query response";
+                queryResponse["requestID"] = requestId;
+                queryResponse["maxArea"] = QString::fromStdString(maxArea);
+                if (queryType == 0)
+                {
+                    queryResponse["maxAverage"] = maxValue;
+                }
+                else
+                {
+                    queryResponse["maxAqi"] = maxValue;
+                }
+
+                QJsonDocument responseDoc(queryResponse);
+                std::string responseMessage = responseDoc.toJson(QJsonDocument::Compact).toStdString() + "\n";
+                socket.write(responseMessage.c_str());
+                socket.waitForBytesWritten();
+
+                std::cout << "Sent query response with request ID: " << requestId << " max area: " << maxArea << " max value: " << maxValue << std::endl;
+
+                socket.close();
             }
-            else
-            {
-                queryResponse["maxAqi"] = maxValue;
-            }
-
-            std::string responseMessage = queryResponse.dump() + "\n";
-            asio::write(socket, asio::buffer(responseMessage));
-
-            std::cout << "Sent query response with request ID: " << requestId << " max area: " << maxArea << " max value: " << maxValue << std::endl;
-
-            socket.close();
         }
         else
         {
-            std::cerr << "Invalid request type: " << initAnalyticsMessage["requestType"] << std::endl;
+            std::cerr << "Invalid request type: " << initAnalyticsMessage["requestType"].toString().toStdString() << std::endl;
         }
-    }
-    catch (const json::exception &e)
-    {
-        std::cerr << "JSON Exception: " << e.what() << std::endl;
     }
     catch (const std::runtime_error &e)
     {
@@ -171,19 +176,18 @@ void handleInitAnalytics(const std::string &message)
     }
 }
 
-void handleClient(tcp::socket socket)
+void handleClient(QTcpSocket *socket)
 {
     try
     {
-        asio::streambuf buffer;
-        asio::read_until(socket, buffer, "\n");
-        std::istream is(&buffer);
-        std::string message;
-        std::getline(is, message);
+        socket->waitForReadyRead();
+        QByteArray buffer = socket->readAll();
+        std::string message = buffer.toStdString();
 
         handleInitAnalytics(message);
 
-        socket.close();
+        socket->close();
+        delete socket;
     }
     catch (const std::exception &e)
     {
@@ -191,38 +195,48 @@ void handleClient(tcp::socket socket)
     }
 }
 
-void startServer(asio::io_context &io_context, unsigned short port)
+void startServer(quint16 port)
 {
-    tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
-    while (true)
+    QTcpServer server;
+    if (!server.listen(QHostAddress::Any, port))
     {
-        tcp::socket socket(io_context);
-        acceptor.accept(socket);
-        std::thread(handleClient, std::move(socket)).detach();
+        std::cerr << "Server could not start!" << std::endl;
     }
+    else
+    {
+        std::cout << "Server started!" << std::endl;
+    }
+
+    QObject::connect(&server, &QTcpServer::newConnection, [&server]()
+    {
+        QTcpSocket *socket = server.nextPendingConnection();
+        std::thread(handleClient, socket).detach();
+    });
+
+    QEventLoop loop;
+    loop.exec();
 }
 
 void registerWithRegistryServer(const std::string &serverIp, unsigned short port, const std::string &nodeIp, double computingCapacity)
 {
     try
     {
-        asio::io_context io_context;
-        tcp::resolver resolver(io_context);
-        tcp::resolver::results_type endpoints = resolver.resolve(serverIp, std::to_string(port));
+        QTcpSocket socket;
+        socket.connectToHost(QString::fromStdString(serverIp), port);
+        if (socket.waitForConnected())
+        {
+            QJsonObject registrationRequest;
+            registrationRequest["requestType"] = "registering";
+            registrationRequest["Ip"] = QString::fromStdString(nodeIp);
+            registrationRequest["nodeType"] = "analytics";
+            registrationRequest["computingCapacity"] = computingCapacity;
 
-        tcp::socket socket(io_context);
-        asio::connect(socket, endpoints);
-
-        json registrationRequest = {
-            {"requestType", "registering"},
-            {"Ip", nodeIp},
-            {"nodeType", "analytics"},
-            {"computingCapacity", computingCapacity}};
-
-        std::string message = registrationRequest.dump() + "\n";
-        asio::write(socket, asio::buffer(message));
-
-        socket.close();
+            QJsonDocument doc(registrationRequest);
+            std::string message = doc.toJson(QJsonDocument::Compact).toStdString() + "\n";
+            socket.write(message.c_str());
+            socket.waitForBytesWritten();
+            socket.close();
+        }
     }
     catch (const std::exception &e)
     {
@@ -248,11 +262,7 @@ int main(int argc, char *argv[])
     // Start server to handle Init Analytics messages and analytics requests
     try
     {
-        asio::io_context io_context;
-        std::thread serverThread([&io_context, port]()
-                                 { startServer(io_context, port); });
-
-        serverThread.join();
+        startServer(port);
     }
     catch (const std::exception &e)
     {

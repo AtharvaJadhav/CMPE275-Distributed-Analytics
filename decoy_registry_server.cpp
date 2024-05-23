@@ -1,52 +1,63 @@
 #include <iostream>
 #include <vector>
 #include <thread>
-#include <asio.hpp>
-#include "json.hpp"
+#include <QTcpSocket>
+#include <QTcpServer>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
-using json = nlohmann::json;
-using asio::ip::tcp;
+std::vector<QJsonObject> registeredNodes;
 
-std::vector<json> registeredNodes;
-
-void handleClient(tcp::socket socket)
+void handleClient(QTcpSocket *socket)
 {
     try
     {
-        asio::streambuf buffer;
-        asio::read_until(socket, buffer, "\n");
-        std::istream is(&buffer);
-        std::string message;
-        std::getline(is, message);
-
-        std::cout << "Received message: " << message << std::endl; // Log received message
-
-        json request = json::parse(message);
-        if (request["requestType"] == "registering")
+        if (socket->waitForReadyRead())
         {
-            json nodeInfo = {
-                {"Ip", request["Ip"]},
-                {"nodeType", request["nodeType"]},
-                {"computingCapacity", request["computingCapacity"]}};
-            registeredNodes.push_back(nodeInfo);
-            std::cout << "Node connected: " << nodeInfo.dump() << std::endl;
+            QByteArray buffer = socket->readAll();
+            std::string message = buffer.toStdString();
 
-            json discoveryMessage = {
-                {"requestType", "Node Discovery"},
-                {"nodes", registeredNodes},
-                {"metadataAnalyticsLeader", ""},
-                {"metadataIngestionLeader", ""},
-                {"initElectionIngestion", "127.0.0.1"}};
+            std::cout << "Received message: " << message << std::endl; // Log received message
 
-            std::string discoveryMessageStr = discoveryMessage.dump() + "\n";
-            asio::write(socket, asio::buffer(discoveryMessageStr));
+            QJsonDocument doc = QJsonDocument::fromJson(QString::fromStdString(message).toUtf8());
+            QJsonObject request = doc.object();
+
+            if (request["requestType"].toString() == "registering")
+            {
+                QJsonObject nodeInfo;
+                nodeInfo["Ip"] = request["Ip"].toString();
+                nodeInfo["nodeType"] = request["nodeType"].toString();
+                nodeInfo["computingCapacity"] = request["computingCapacity"].toDouble();
+                registeredNodes.push_back(nodeInfo);
+                std::cout << "Node connected: " << QJsonDocument(nodeInfo).toJson(QJsonDocument::Compact).toStdString() << std::endl;
+
+                QJsonArray nodesArray;
+                for (const auto &node : registeredNodes)
+                {
+                    nodesArray.append(node);
+                }
+
+                QJsonObject discoveryMessage;
+                discoveryMessage["requestType"] = "Node Discovery";
+                discoveryMessage["nodes"] = nodesArray;
+                discoveryMessage["metadataAnalyticsLeader"] = "";
+                discoveryMessage["metadataIngestionLeader"] = "";
+                discoveryMessage["initElectionIngestion"] = "127.0.0.1";
+
+                QJsonDocument discoveryDoc(discoveryMessage);
+                std::string discoveryMessageStr = discoveryDoc.toJson(QJsonDocument::Compact).toStdString() + "\n";
+                socket->write(discoveryMessageStr.c_str());
+                socket->waitForBytesWritten();
+            }
+            else
+            {
+                std::cerr << "Received unknown request type: " << request["requestType"].toString().toStdString() << std::endl;
+            }
+
+            socket->close();
+            delete socket;
         }
-        else
-        {
-            std::cerr << "Received unknown request type: " << request["requestType"] << std::endl;
-        }
-
-        socket.close();
     }
     catch (std::exception &e)
     {
@@ -54,25 +65,35 @@ void handleClient(tcp::socket socket)
     }
 }
 
-void startServer(asio::io_context &io_context, unsigned short port)
+void startServer(quint16 port)
 {
-    tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
-    while (true)
+    QTcpServer server;
+    if (!server.listen(QHostAddress::Any, port))
     {
-        tcp::socket socket(io_context);
-        acceptor.accept(socket);
-        std::cout << "Accepted connection from: " << socket.remote_endpoint() << std::endl; // Log connection acceptance
-        std::thread(handleClient, std::move(socket)).detach();
+        std::cerr << "Server could not start!" << std::endl;
     }
+    else
+    {
+        std::cout << "Server started!" << std::endl;
+    }
+
+    QObject::connect(&server, &QTcpServer::newConnection, [&server]()
+    {
+        QTcpSocket *socket = server.nextPendingConnection();
+        std::cout << "Accepted connection from: " << socket->peerAddress().toString().toStdString() << std::endl; // Log connection acceptance
+        std::thread(handleClient, socket).detach();
+    });
+
+    QEventLoop loop;
+    loop.exec();
 }
 
 int main()
 {
     try
     {
-        asio::io_context io_context;
-        std::thread serverThread([&io_context]()
-                                 { startServer(io_context, 12345); });
+        std::thread serverThread([]()
+                                 { startServer(12345); });
 
         serverThread.join();
     }
